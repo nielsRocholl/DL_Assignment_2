@@ -11,8 +11,14 @@ import matplotlib.pyplot as plt
 import random
 from collections import deque
 import time
+import pandas as pd
+
 
 tf.disable_v2_behavior()  # testing on tensorflow 1
+# sess = tf.Session(config=tf.ConfigProto(log_device_placement=True))
+config = tf.ConfigProto(device_count={'GPU': 1, 'CPU': 56})
+sess = tf.Session(config=config)
+tf.keras.backend.set_session(sess)
 
 
 def plot(values, values2, save):
@@ -29,7 +35,7 @@ def plot(values, values2, save):
         plt.savefig('pic')
 
 
-class MoonlanderEnvManager():
+class MoonlanderEnvManager:
     def __init__(self):
         self.env = gym.make('LunarLander-v2')
         self.env.reset()
@@ -54,7 +60,7 @@ class MoonlanderEnvManager():
         return self.env.observation_space.shape[0]
 
 
-class DQN():
+class DQN:
     def __init__(self, input_dim, num_actions):
         self.activation = 'relu'
         self.optimizer = Adam(learning_rate=0.0001)
@@ -63,13 +69,17 @@ class DQN():
 
     def init_model(self):
         model = Sequential([
-            Dense(128, input_dim=self.input_dim, activation="relu"),
-            Dense(128, activation="relu"),
+            Dense(64, input_dim=self.input_dim, activation="relu"),
+            Dense(64, activation="relu"),
             Dense(self.num_actions, activation="linear")
         ])
         model.compile(loss="mse", optimizer=self.optimizer)
 
         return model
+
+
+def _reshape_state_for_net(state):
+    return np.reshape(state, (1, 8))
 
 
 class Agent:
@@ -112,7 +122,7 @@ class Agent:
         return action
 
     # update params in NN
-    def learn(self):
+    def learn_normal_q(self):
 
         # take a mini-batch from replay experience
         cur_batch_size = min(len(self.replay_memory), self.batch_size)
@@ -141,20 +151,20 @@ class Agent:
         # choose max action for each state
         sample_qhat_next = np.max(sample_qhat_next, axis=1)
 
-        sample_qhat = self.policy_net.predict(sample_states)
+        sample_qhat = self.policy_net.predict(sample_next_states)
 
         for i in range(cur_batch_size):
             a = sample_actions[i, 0]
+
             sample_qhat[i, int(a)] = sample_rewards[i] + self.gamma * sample_qhat_next[i]
 
         q_target = sample_qhat
 
         self.policy_net.fit(sample_states, q_target, epochs=1, verbose=0)
 
-    def _reshape_state_for_net(self, state):
-        return np.reshape(state, (1, 8))
+    # update params in NN
+    def learn_double_q(self):
 
-    def experience_replay(self):
         # take a mini-batch from replay experience
         cur_batch_size = min(len(self.replay_memory), self.batch_size)
         minibatch = random.sample(self.replay_memory, cur_batch_size)
@@ -162,12 +172,12 @@ class Agent:
 
         for experience in minibatch:
             state, action, reward, next_state, done = experience
-            state = self._reshape_state_for_net(state)
+            state = _reshape_state_for_net(state)
             experience_new_q_values = self.policy_net.predict(state)[0]
             if done:
                 q_update = reward
             else:
-                next_state = self._reshape_state_for_net(next_state)
+                next_state = _reshape_state_for_net(next_state)
                 # using online network to SELECT action
                 online_net_selected_action = np.argmax(self.policy_net.predict(next_state))
                 # using target network to EVALUATE action
@@ -180,7 +190,7 @@ class Agent:
         self.policy_net.fit(minibatch_states, minibatch_new_q_values, verbose=False, epochs=1)
 
 
-class EpsilonGreedyStrategy():
+class EpsilonGreedyStrategy:
     def __init__(self, start, end, decay):
         self.start = start
         self.end = end
@@ -192,7 +202,7 @@ class EpsilonGreedyStrategy():
 
 
 def main():
-    batch_size = 64
+    batch_size = 32
     gamma = 0.99
     eps_start = 1
     eps_end = 0.01
@@ -212,7 +222,7 @@ def main():
     aver_reward = []
     aver = deque(maxlen=100)
 
-    for episode in range(1000):
+    for episode in range(500):
         state = em.reset()
         total_reward = 0
         done = False
@@ -226,8 +236,7 @@ def main():
             total_reward += reward
 
             agent.add_to_replay_memory(state, action, reward, next_state, done)
-            # agent.learn()
-            agent.experience_replay()
+            agent.learn_double_q()
 
             state = next_state
 
@@ -235,7 +244,13 @@ def main():
         aver_reward.append(np.mean(aver))
 
         rewards.append(total_reward)
-        plot(rewards, aver_reward, episode == 999)
+        plot(rewards, aver_reward, episode == 499)
+
+        # save data
+        df = pd.DataFrame(rewards)
+        df2 = pd.DataFrame(aver_reward)
+        df.to_csv('data/rewards.csv')
+        df2.to_csv('data/aver_rewards.csv')
 
         agent.update_target_net()
         # agent.epsilon = max(0.1, 0.995 * agent.epsilon)  # decaying exploration
