@@ -7,4 +7,4 @@ This will train the agent and perform all hyperparameter experiments.
 
 You can also plot the results ny running: python3 plot.py
 
-if you uncomment "plot" in the main function you will se aa live plot. And if you uncomment "em.render()" you can see the agent in action. 
+if you uncomment "plot" in the main function you will se a live plot. And if you uncomment "em.render()" you can see the agent in action. 
